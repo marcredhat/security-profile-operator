@@ -27,9 +27,6 @@ items:
     template:
       metadata:
         annotations:
-          container.seccomp.security.alpha.kubernetes.io/security-profiles-operator: localhost/security-profiles-operator.json
-          openshift.io/scc: privileged
-          seccomp.security.alpha.kubernetes.io/pod: runtime/default
         creationTimestamp: null
         labels:
           app: security-profiles-operator
