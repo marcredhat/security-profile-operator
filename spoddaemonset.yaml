@@ -1,0 +1,266 @@
+apiVersion: v1
+items:
+- apiVersion: apps/v1
+  kind: DaemonSet
+  metadata:
+    annotations:
+      deprecated.daemonset.template.generation: "1"
+    creationTimestamp: "2021-11-11T05:05:31Z"
+    generation: 1
+    name: spod
+    namespace: security-profiles-operator
+    ownerReferences:
+    - apiVersion: security-profiles-operator.x-k8s.io/v1alpha1
+      blockOwnerDeletion: true
+      controller: true
+      kind: SecurityProfilesOperatorDaemon
+      name: spod
+      uid: eec4d30e-4c87-4dc9-b187-9f86e1747f98
+    resourceVersion: "2480797"
+    uid: d028531c-5e6d-4e28-83b4-0946b509aa4f
+  spec:
+    revisionHistoryLimit: 10
+    selector:
+      matchLabels:
+        app: security-profiles-operator
+        name: spod
+    template:
+      metadata:
+        annotations:
+          container.seccomp.security.alpha.kubernetes.io/security-profiles-operator: localhost/security-profiles-operator.json
+          openshift.io/scc: privileged
+          seccomp.security.alpha.kubernetes.io/pod: runtime/default
+        creationTimestamp: null
+        labels:
+          app: security-profiles-operator
+          name: spod
+      spec:
+        containers:
+        - args:
+          - daemon
+          env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: spec.nodeName
+          - name: OPERATOR_NAMESPACE
+            valueFrom:
+              fieldRef:
+                apiVersion: v1
+                fieldPath: metadata.namespace
+          image: gcr.io/k8s-staging-sp-operator/security-profiles-operator:latest
+          imagePullPolicy: Always
+          livenessProbe:
+            failureThreshold: 1
+            httpGet:
+              path: /healthz
+              port: liveness-port
+              scheme: HTTP
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 1
+          name: security-profiles-operator
+          ports:
+          - containerPort: 8085
+            name: liveness-port
+            protocol: TCP
+          resources:
+            limits:
+              ephemeral-storage: 200Mi
+              memory: 128Mi
+            requests:
+              cpu: 100m
+              ephemeral-storage: 50Mi
+              memory: 64Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsGroup: 65535
+            runAsUser: 65535
+            seLinuxOptions:
+              type: spc_t
+          startupProbe:
+            failureThreshold: 10
+            httpGet:
+              path: /healthz
+              port: liveness-port
+              scheme: HTTP
+            periodSeconds: 3
+            successThreshold: 1
+            timeoutSeconds: 1
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+          - mountPath: /var/lib/kubelet/seccomp/operator
+            name: host-operator-volume
+          - mountPath: /etc/selinux.d
+            name: selinux-drop-dir
+          - mountPath: /var/run/selinuxd
+            name: selinuxd-private-volume
+          - mountPath: /tmp/security-profiles-operator-recordings
+            name: profile-recording-output-volume
+          - mountPath: /var/run/grpc
+            name: grpc-server-volume
+        - args:
+          - --secure-listen-address=0.0.0.0:9443
+          - --upstream=http://127.0.0.1:8080
+          - --v=10
+          - --tls-cert-file=/var/run/secrets/metrics/tls.crt
+          - --tls-private-key-file=/var/run/secrets/metrics/tls.key
+          image: quay.io/brancz/kube-rbac-proxy:v0.9.0
+          imagePullPolicy: IfNotPresent
+          name: metrics
+          ports:
+          - containerPort: 9443
+            name: https
+            protocol: TCP
+          resources:
+            limits:
+              ephemeral-storage: 20Mi
+              memory: 128Mi
+            requests:
+              cpu: 50m
+              ephemeral-storage: 10Mi
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+          - mountPath: /var/run/secrets/metrics
+            name: metrics-cert-volume
+            readOnly: true
+        dnsPolicy: ClusterFirst
+        initContainers:
+        - args:
+          - non-root-enabler
+          image: gcr.io/k8s-staging-sp-operator/security-profiles-operator:latest
+          imagePullPolicy: Always
+          name: non-root-enabler
+          resources:
+            limits:
+              ephemeral-storage: 50Mi
+              memory: 64Mi
+            requests:
+              cpu: 100m
+              ephemeral-storage: 10Mi
+              memory: 32Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              add:
+              - CHOWN
+              - FOWNER
+              - FSETID
+              - DAC_OVERRIDE
+              drop:
+              - ALL
+            readOnlyRootFilesystem: true
+            runAsUser: 0
+            seLinuxOptions:
+              type: spc_t
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+          - mountPath: /var/lib
+            name: host-varlib-volume
+          - mountPath: /opt/spo-profiles
+            name: operator-profiles-volume
+            readOnly: true
+          - mountPath: /var/run/secrets/metrics
+            name: metrics-cert-volume
+        nodeSelector:
+          kubernetes.io/os: linux
+        restartPolicy: Always
+        schedulerName: default-scheduler
+        securityContext: {}
+        serviceAccount: spod
+        serviceAccountName: spod
+        terminationGracePeriodSeconds: 30
+        tolerations:
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/master
+          operator: Exists
+        - effect: NoSchedule
+          key: node-role.kubernetes.io/control-plane
+          operator: Exists
+        - effect: NoExecute
+          key: node.kubernetes.io/not-ready
+          operator: Exists
+        volumes:
+        - hostPath:
+            path: /var/lib
+            type: Directory
+          name: host-varlib-volume
+        - hostPath:
+            path: /var/lib/security-profiles-operator
+            type: DirectoryOrCreate
+          name: host-operator-volume
+        - configMap:
+            defaultMode: 420
+            name: security-profiles-operator-profile
+          name: operator-profiles-volume
+        - hostPath:
+            path: /etc/selinux.d
+            type: DirectoryOrCreate
+          name: selinux-drop-dir
+        - emptyDir: {}
+          name: selinuxd-private-volume
+        - hostPath:
+            path: /sys/fs/selinux
+            type: Directory
+          name: host-fsselinux-volume
+        - hostPath:
+            path: /etc/selinux
+            type: Directory
+          name: host-etcselinux-volume
+        - hostPath:
+            path: /var/lib/selinux
+            type: Directory
+          name: host-varlibselinux-volume
+        - hostPath:
+            path: /tmp/security-profiles-operator-recordings
+            type: DirectoryOrCreate
+          name: profile-recording-output-volume
+        - hostPath:
+            path: /var/log/audit
+            type: DirectoryOrCreate
+          name: host-auditlog-volume
+        - hostPath:
+            path: /var/log
+            type: DirectoryOrCreate
+          name: host-syslog-volume
+        - name: metrics-cert-volume
+          secret:
+            defaultMode: 420
+            secretName: metrics-server-cert
+        - hostPath:
+            path: /sys/kernel/debug
+            type: Directory
+          name: sys-kernel-debug-volume
+        - hostPath:
+            path: /etc/os-release
+            type: File
+          name: host-etc-osrelease-volume
+        - emptyDir: {}
+          name: tmp-volume
+        - emptyDir: {}
+          name: grpc-server-volume
+    updateStrategy:
+      rollingUpdate:
+        maxSurge: 0
+        maxUnavailable: 1
+      type: RollingUpdate
+  status:
+    currentNumberScheduled: 0
+    desiredNumberScheduled: 0
+    numberMisscheduled: 0
+    numberReady: 0
+kind: List
+metadata:
+  resourceVersion: ""
+  selfLink: ""
